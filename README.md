@@ -17,16 +17,16 @@ Try the app directly on Hugging Face Spaces:
 ## Models Overview
 
 This repository implements two distinct approaches to AI detection:
-
 ### 1. Hybrid XGBoost Model (Statistical & Linguistic)
-This model combines traditional text analysis with linguistic feature engineering. It is fast and interpretable.
-* **Input Processing:** TF-IDF Vectorization.
-* **Linguistic Features:** Extracts 13 stylistic features using `Spacy`, including:
-    * Part-of-Speech Ratios (Nouns, Verbs, Adjectives).
-    * Average Sentence Length & Word Length.
-    * Type-Token Ratio (TTR) for vocabulary richness.
-    * Punctuation usage.
-* **Classifier:** XGBoost (Extreme Gradient Boosting).
+A high-performance classifier achieving **93.16% accuracy**. This model combines surface-level statistical patterns with deep morphological analysis to distinguish human nuances from AI consistency.
+
+* **Input Processing:**
+    * **Character N-grams (TF-IDF):** Captures surface features like punctuation habits, spacing, and orthography.
+* **Linguistic Features:** Extracted using **Farasa** (specialized Arabic NLP toolkit), including:
+    * **Morphological Ratios:** Frequency of Nouns, Verbs, Adjectives, Determiners, and Particles.
+    * **Stylometric Stats:** Average Sentence Length, Word Length, and Type-Token Ratio (TTR).
+    * **Unknown Token Ratio:** Specifically targets informal words, misspellings, and dialectal terms that AI models rarely generate.
+* **Classifier:** XGBoost trained on the combined vector of N-grams and linguistic features.
 
 ### 2. Fine-Tuned AraBERT (Deep Learning)
 A Transformer-based model optimized for understanding semantic context in Arabic.
