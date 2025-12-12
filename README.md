@@ -1,5 +1,5 @@
 
-````
+
 # 🧠 Arabic AI Text Detector | كاشف النصوص العربية
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
@@ -38,7 +38,7 @@ A Transformer-based model optimized for understanding semantic context in Arabic
 
 ## Project Structure
 
-```text
+```
 arabic_ai_text_detector/
 │
 ├── app.py                     # Main application file (Gradio UI)
@@ -56,7 +56,7 @@ arabic_ai_text_detector/
         ├── pytorch_model.bin            # The Fine-Tuned BERT weights
         ├── tokenizer.json
         └── vocab.txt
-````
+```
 
 -----
 
