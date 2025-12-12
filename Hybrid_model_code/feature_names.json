@@ -1,0 +1,15 @@
+[
+    "NOUN_ratio",
+    "VERB_ratio",
+    "PART_ratio",
+    "ADJ_ratio",
+    "NUM_ratio",
+    "PRON_ratio",
+    "DET_ratio",
+    "PUNC_ratio",
+    "avg_word_len",
+    "word_count",
+    "TTR_ratio",
+    "avg_sentence_len",
+    "UNKNOWN_ratio"
+]
