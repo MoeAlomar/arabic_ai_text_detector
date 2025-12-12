@@ -13,8 +13,8 @@ from arabert.preprocess import ArabertPreprocessor
 # 📂 FOLDER CONFIGURATION
 
 # Make sure your folders are named exactly this in your GitHub repo!
-PATH_XGB_ENGLISH = "models/Hybrid_XGBoost_model/"
-PATH_BERT_ARABIC = "models/Fine_tuned_model/"
+PATH_XGB_ENGLISH = "Models/Hybrid_XGBoost_model/"
+PATH_BERT_ARABIC = "Models/Fine_tuned_model/"
 
 print("⏳ Starting AI Detection App...")
 
