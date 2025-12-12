@@ -1,7 +1,7 @@
 import gradio as gr
 import pickle
+import joblib
 import pandas as pd
-import numpy as np
 import spacy
 import torch
 import os
@@ -9,70 +9,82 @@ from scipy.sparse import hstack
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from arabert.preprocess import ArabertPreprocessor
 
-
 # 📂 FOLDER CONFIGURATION
-
-# Make sure your folders are named exactly this in your GitHub repo!
 PATH_XGB_ENGLISH = "Models/Hybrid_XGBoost_model/"
 PATH_BERT_ARABIC = "Models/Fine_tuned_model/"
 
 print("⏳ Starting AI Detection App...")
 
-# LOAD Hybrid MODEL
+# ==========================================
+# ✅ LOAD SPACY (for linguistic features)
+# ==========================================
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    print("Downloading Spacy model...")
+    os.system("python -m spacy download en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
+
+# ==========================================
+# ✅ LOAD HYBRID MODEL (XGBoost + TFIDF + Feature Columns)
+# ==========================================
+def load_pickle(path: str):
+    with open(path, "rb") as f:
+        return pickle.load(f)
 
 try:
-    # Check/Download Spacy Model for linguistic features
-    try:
-        nlp = spacy.load("en_core_web_sm")
-    except OSError:
-        print("Downloading Spacy model...")
-        os.system("python -m spacy download en_core_web_sm")
-        nlp = spacy.load("en_core_web_sm")
+    print(f"Loading Hybrid XGBoost assets from {PATH_XGB_ENGLISH}...")
 
-    # Load the 3 Pickle files
-    print(f"Loading XGBoost from {PATH_XGB_ENGLISH}...")
-    with open(os.path.join(PATH_XGB_ENGLISH, "hybrid_xgb.pkl"), "rb") as f:
-        xgb_model = pickle.load(f)
-    with open(os.path.join(PATH_XGB_ENGLISH, "tfidf_vectorizer.pkl"), "rb") as f:
-        tfidf_vectorizer = pickle.load(f)
-    with open(os.path.join(PATH_XGB_ENGLISH, "linguistic_feature_columns.pkl"), "rb") as f:
-        feature_columns = pickle.load(f)
+    xgb_path = os.path.join(PATH_XGB_ENGLISH, "hybrid_xgb.pkl")
+    tfidf_path = os.path.join(PATH_XGB_ENGLISH, "tfidf_vectorizer.pkl")
+    cols_path = os.path.join(PATH_XGB_ENGLISH, "linguistic_feature_columns.pkl")
+
+    # XGBoost model is normal pickle
+    xgb_model = load_pickle(xgb_path)
+
+    # TFIDF is joblib in your case
+    tfidf_vectorizer = joblib.load(tfidf_path)
+
+    # Feature columns list is normal pickle
+    feature_columns = load_pickle(cols_path)
 
     print("✅ Hybrid Model Loaded Successfully")
+
 except Exception as e:
     print(f"❌ Error loading Hybrid Model: {e}")
     xgb_model = None
+    tfidf_vectorizer = None
+    feature_columns = None
 
-# LOAD ARABIC MODEL (BERT)
-
+# ==========================================
+# ✅ LOAD ARABIC MODEL (Fine-tuned AraBERT)
+# ==========================================
 try:
     print(f"Loading BERT from {PATH_BERT_ARABIC}...")
     device = "cpu"
 
-    # Load Tokenizer & Model
-    # This expects 'pytorch_model.bin' or 'model.safetensors' to be in the folder!
     tokenizer_bert = AutoTokenizer.from_pretrained(PATH_BERT_ARABIC)
-    model_bert = AutoModelForSequenceClassification.from_pretrained(
-        PATH_BERT_ARABIC).to(device)
+    model_bert = AutoModelForSequenceClassification.from_pretrained(PATH_BERT_ARABIC).to(device)
 
-    # Initialize Arabert Preprocessor (downloads config automatically)
-    arabert_prep = ArabertPreprocessor(
-        model_name="aubmindlab/bert-base-arabertv02")
+    arabert_prep = ArabertPreprocessor(model_name="aubmindlab/bert-base-arabertv02")
 
     print("✅ Fine tuned Model Loaded Successfully")
+
 except Exception as e:
     print(f"❌ Error loading Model: {e}")
     print("⚠️  Did you forget to upload the 'pytorch_model.bin' or 'model.safetensors' file?")
     model_bert = None
+    tokenizer_bert = None
+    arabert_prep = None
+    device = "cpu"
 
 # ==========================================
 # 🧠 FEATURE EXTRACTION & PREDICTION
 # ==========================================
-
-
-def get_english_features(text):
-    """Extracts linguistic features using Spacy (Noun ratio, etc.)"""
+def get_features(text: str) -> pd.DataFrame:
+    """Extract linguistic features using Spacy (POS ratios, etc.)"""
     doc = nlp(text)
+
     word_count = len([t for t in doc if not t.is_punct])
     if word_count == 0:
         word_count = 1
@@ -92,44 +104,42 @@ def get_english_features(text):
         "word_count": word_count,
         "TTR_ratio": len(set([t.text.lower() for t in doc])) / word_count,
         "avg_sentence_len": word_count / len(list(doc.sents)) if len(list(doc.sents)) > 0 else 0,
-        "UNKNOWN_ratio": 0
+        "UNKNOWN_ratio": 0,
     }
-    # Return as DataFrame with columns in the exact order the model expects
+
+    # IMPORTANT: keep the column order exactly as training time
     return pd.DataFrame([features])[feature_columns]
 
 
-def predict_english(text):
-    if xgb_model is None:
-        return {"Error": "XGBoost model files missing."}
-    if not text.strip():
+def predict_XGBoost(text: str):
+    if xgb_model is None or tfidf_vectorizer is None or feature_columns is None:
+        return {"Error": "Hybrid model files missing or failed to load."}
+
+    if not text or not text.strip():
         return "Please enter text."
 
     try:
-        # 1. Transform Text (TF-IDF)
         tfidf_data = tfidf_vectorizer.transform([text])
-        # 2. Get Linguistic Features
-        ling_data = get_english_features(text)
-        # 3. Combine
+        ling_data = get_features(text)
         full_data = hstack([tfidf_data, ling_data])
-        # 4. Predict
-        probs = xgb_model.predict_proba(full_data)[0]
 
-        # Result: Class 0 is Human, Class 1 is AI (Verify your training labels if swapped!)
-        return {"👤 Human Written": float(probs[0]), "🤖 AI Generated": float(probs[1])}
+        probs = xgb_model.predict_proba(full_data)[0]
+        return {"👤 نص بشري": float(probs[0]), "🤖 ذكاء اصطناعي": float(probs[1])}
+
     except Exception as e:
         return f"Prediction Error: {str(e)}"
 
 
-def predict_arabic(text):
-    if model_bert is None:
-        return {"Error": "Arabic model files missing (check pytorch_model.bin)."}
-    if not text.strip():
+def predict_arabic(text: str):
+    if model_bert is None or tokenizer_bert is None or arabert_prep is None:
+        return {"Error": "Arabic model files missing (check pytorch_model.bin / model.safetensors)."}
+
+    if not text or not text.strip():
         return "الرجاء إدخال نص."
 
     try:
-        # 1. Preprocess
         prep_text = arabert_prep.preprocess(text)
-        # 2. Tokenize
+
         inputs = tokenizer_bert(
             prep_text,
             return_tensors="pt",
@@ -138,57 +148,49 @@ def predict_arabic(text):
             max_length=256
         ).to(device)
 
-        # 3. Predict
         with torch.no_grad():
             outputs = model_bert(**inputs)
             probs = torch.nn.functional.softmax(outputs.logits, dim=1)
 
-        # Result
         prob_human = float(probs[0][0])
         prob_ai = float(probs[0][1])
 
         return {"👤 نص بشري": prob_human, "🤖 ذكاء اصطناعي": prob_ai}
+
     except Exception as e:
         return f"Error: {str(e)}"
 
 # ==========================================
 # 🎨 GRADIO UI (TABS)
 # ==========================================
-
-
 with gr.Blocks(title="AI Text Detector", theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# 🕵️‍♂️ Global AI Text Detector")
-    gr.Markdown(
-        "Detect if text was written by a Human or AI in English and Arabic.")
+    gr.Markdown("# 🧠 Arabic AI Generated Text Detector")
+    gr.Markdown("Detect if text was written by a Human or AI in Arabic.")
 
     with gr.Tabs():
 
         # --- TAB 1: Hybrid ---
-        with gr.TabItem(" Hybrid Model Detector"):
-            gr.Markdown("### Hybrid XGBoost Model")
-            gr.Markdown(
-                "This model analyzes vocabulary (TF-IDF) and grammar stats (Noun/Verb ratios).")
+        with gr.TabItem("Hybrid Model Detector"):
+            gr.Markdown("### Hybrid XGBoost Model (Higher accuracy)")
+            gr.Markdown("This model uses hybrid approaches to detect Arabic AI generated text.")
 
             with gr.Row():
-                eng_input = gr.Textbox(
-                    lines=5, label="English Text", placeholder="Paste article or essay here...")
-                eng_output = gr.Label(label="Probability")
+                arr_input = gr.Textbox(lines=5, label="Text", placeholder="اكتب النص هنا...", rtl=True)
+                arr_output = gr.Label(label="الإحتمالية")
 
-            eng_btn = gr.Button("Analyze English Text", variant="primary")
-            eng_btn.click(predict_english, inputs=eng_input,
-                          outputs=eng_output)
+            eng_btn = gr.Button("حلل النص", variant="primary")
+            eng_btn.click(predict_XGBoost, inputs=arr_input, outputs=arr_output)
 
         # --- TAB 2: ARABIC ---
         with gr.TabItem("AraBERT Detector"):
-            gr.Markdown("### Fine-Tuned AiBERT Model")
-            gr.Markdown("نموذج ذكاء اصطناعي متخصص في كشف النصوص العربية")
+            gr.Markdown("### Fine-Tuned AraBERT Model")
+            gr.Markdown("Fine-tuned AraBERT model using our own dataset to detect Arabic AI generated text.")
 
             with gr.Row():
-                ar_input = gr.Textbox(
-                    lines=5, label="النص العربي", placeholder="ضع النص هنا...", rtl=True)
+                ar_input = gr.Textbox(lines=5, label="النص العربي", placeholder="ضع النص هنا...", rtl=True)
                 ar_output = gr.Label(label="النتيجة")
 
-            ar_btn = gr.Button("تحليل النص", variant="primary")
+            ar_btn = gr.Button("حلل النص", variant="primary")
             ar_btn.click(predict_arabic, inputs=ar_input, outputs=ar_output)
 
 if __name__ == "__main__":
